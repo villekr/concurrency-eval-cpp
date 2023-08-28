@@ -17,7 +17,6 @@
 
 using namespace std;
 using namespace aws::lambda_runtime;
-using namespace aws::lambda_runtime;
 using namespace Aws::Utils::Logging;
 using namespace Aws::Utils::Json;
 using namespace Aws::S3::Model;

@@ -1,0 +1,74 @@
+name: PR Quality Gate (C++)
+
+on:
+  pull_request:
+    branches: [ main, "update" ]
+
+jobs:
+  quality:
+    name: Lint, syntax check and metrics
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang clang-tidy clang-format cppcheck python3-pip
+          pip3 install --user lizard
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: List source files
+        id: files
+        run: |
+          echo "CPP_LIST=$(ls src/*.cpp 2>/dev/null || true)" >> $GITHUB_OUTPUT
+          echo "HPP_LIST=$(ls include/*.h 2>/dev/null || true)" >> $GITHUB_OUTPUT
+
+      - name: clang-format check
+        if: steps.files.outputs.CPP_LIST != '' || steps.files.outputs.HPP_LIST != ''
+        run: |
+          set -e
+          files=( $(ls src/*.cpp 2>/dev/null || true) $(ls include/* 2>/dev/null || true) )
+          if [ ${#files[@]} -gt 0 ]; then
+            clang-format --Werror --dry-run "${files[@]}"
+          fi
+
+      - name: cppcheck (syntax + style)
+        run: |
+          set -e
+          cppcheck \
+            --std=c++23 \
+            --enable=all \
+            --inline-suppr \
+            --suppress=missingIncludeSystem \
+            --language=c++ \
+            --error-exitcode=1 \
+            -I include \
+            src 2> cppcheck-report.txt || (cat cppcheck-report.txt; exit 1)
+
+      - name: clang-tidy (header-only analysis)
+        run: |
+          set -e
+          # Run clang-tidy without full compilation database; restrict to basic checks and ignore missing includes
+          for f in src/*.cpp; do
+            [ -f "$f" ] || continue
+            clang-tidy "$f" \
+              --extra-arg=-std=c++23 \
+              --extra-arg=-Iinclude \
+              --warnings-as-errors='*' \
+              --quiet || true
+          done
+
+      - name: Code metrics (cyclomatic complexity with lizard)
+        run: |
+          set -e
+          lizard -l cpp -C 15 -w src include | tee lizard-report.txt
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-analysis-and-metrics
+          path: |
+            cppcheck-report.txt
+            lizard-report.txt

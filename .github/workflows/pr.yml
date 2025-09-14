@@ -79,7 +79,7 @@ jobs:
 
       - name: Code metrics (cyclomatic complexity with lizard)
         run: |
-          # Check only the main Java handler file and fail on warnings
+          # Check only the main handler file and fail on warnings
           # -C: cyclomatic complexity threshold (warn if function > 10)
           # -L: maximum function length (lines) threshold (warn if function > 120)
           lizard -l cpp -C 10 -L 120 src/lambda_handler.cpp

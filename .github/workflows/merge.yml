@@ -84,6 +84,7 @@ jobs:
         run: |
           set -euxo pipefail
           cmake --build build --config Release -j
+          ls -la
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -99,7 +100,7 @@ jobs:
           PREFIX: ${{ env.ARTIFACT_PREFIX }}
         run: |
           set -euxo pipefail
-          ZIP_PATH="build/concurrency-eval-cpp.zip"
+          ZIP_PATH="/lang/cpp/build/concurrency-eval-cpp.zip"
           ZIP_NAME="concurrency-eval-cpp.zip"
           FUNC_KEY="${PREFIX}/${ZIP_NAME}"
           FUNC_VERSION_ID=$(aws s3api put-object --bucket "$BUCKET" --key "$FUNC_KEY" --body "$ZIP_PATH" --query 'VersionId' --output text)

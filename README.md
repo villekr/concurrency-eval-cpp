@@ -38,7 +38,7 @@ func get(s3_key, find):
 ## Build deployment package locally
 
 ```
-docker build -f docker/Dockerfile -t concurrency-eval-cpp .
+docker build -f docker/Dockerfile -t villekr/concurrency-eval-cpp-build-container .
 docker run -it --rm -v $(pwd):/app concurrency-eval-cpp bash
 cd /app && mkdir build && cd build
 cmake ..  \

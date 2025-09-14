@@ -27,4 +27,6 @@ RUN cmake .. \
     -DCMAKE_CXX_COMPILER=g++
 RUN make && make install
 
+WORKDIR /
+
 CMD ["bash"]

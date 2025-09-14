@@ -38,7 +38,7 @@ jobs:
           set -euxo pipefail
           mkdir -p "$GITHUB_WORKSPACE/build"
           cd "$GITHUB_WORKSPACE/build"
-          cmake .. \
+          cmake -S "$GITHUB_WORKSPACE" \
               -DCMAKE_PREFIX_PATH=/vcpkg/installed/arm64-linux/ \
               -DCMAKE_BUILD_TYPE=Release \
               -DBUILD_SHARED_LIBS=OFF \

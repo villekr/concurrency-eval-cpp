@@ -1,5 +1,0 @@
-/app/build/CMakeFiles/concurrency-eval-cpp.dir
-/app/build/CMakeFiles/aws-lambda-package-concurrency-eval-cpp.dir
-/app/build/CMakeFiles/run_local.dir
-/app/build/CMakeFiles/edit_cache.dir
-/app/build/CMakeFiles/rebuild_cache.dir

@@ -8,7 +8,7 @@ jobs:
   package-and-upload:
     name: Package C++ Lambda and upload to S3
     runs-on: ubuntu-24.04-arm
-    container: villekr/concurrency-eval-cpp-build-container
+    container: villekr/concurrency-eval-cpp-build-container:0.1
     permissions:
       id-token: write
       contents: read

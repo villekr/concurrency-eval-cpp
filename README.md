@@ -39,8 +39,8 @@ func get(s3_key, find):
 
 ```
 docker build -f docker/Dockerfile -t villekr/concurrency-eval-cpp-build-container .
-docker run -it --rm -v $(pwd):/app concurrency-eval-cpp bash
-cd /app && mkdir build && cd build
+docker run -it --rm -v $(pwd):/builder concurrency-eval-cpp bash
+cd builder && mkdir build && cd build
 cmake ..  \
     -DCMAKE_PREFIX_PATH=/vcpkg/installed/arm64-linux/ \
     -DCMAKE_BUILD_TYPE=Release \

@@ -2,7 +2,7 @@ name: Merge CI
 
 on:
   push:
-    branches: [ main, "update" ]
+    branches: [ main ]
 
 jobs:
   package-and-upload:
@@ -19,8 +19,6 @@ jobs:
     outputs:
       code_s3_key: ${{ steps.upload.outputs.code_s3_key }}
       code_s3_version: ${{ steps.upload.outputs.code_s3_version }}
-    container:
-      image: public.ecr.aws/lambda/cpp:build
     steps:
       - name: Validate required configuration
         shell: bash
@@ -33,18 +31,64 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure (CMake)
+      - name: Install system dependencies
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake git curl unzip tar zip ninja-build \
+            linux-libc-dev pkg-config libcurl4-openssl-dev
+
+      - name: Set up vcpkg (clone and bootstrap)
+        run: |
+          set -euxo pipefail
+          if [ ! -d vcpkg ]; then
+            git clone https://github.com/microsoft/vcpkg
+          fi
+          ./vcpkg/bootstrap-vcpkg.sh
+
+      - name: Install aws-sdk-cpp via vcpkg (s3 component)
+        env:
+          VCPKG_FORCE_SYSTEM_BINARIES: 1
+        run: |
+          set -euxo pipefail
+          ./vcpkg/vcpkg install "aws-sdk-cpp[s3]" --recurse
+
+      - name: Build and install aws-lambda-cpp (runtime)
+        run: |
+          set -euxo pipefail
+          if [ ! -d aws-lambda-cpp ]; then
+            git clone https://github.com/awslabs/aws-lambda-cpp.git
+          fi
+          cmake -S aws-lambda-cpp -B aws-lambda-cpp/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/aws-lambda-cpp/out" \
+            -DCMAKE_CXX_COMPILER=g++
+          cmake --build aws-lambda-cpp/build --config Release -j
+          cmake --install aws-lambda-cpp/build --config Release
+
+      - name: Configure (CMake)
+        env:
+          VCPKG_INSTALLED: ${{ github.workspace }}/vcpkg/installed/arm64-linux
+          LAMBDA_RUNTIME_PREFIX: ${{ github.workspace }}/aws-lambda-cpp/out
+        run: |
+          set -euxo pipefail
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_PREFIX_PATH="${VCPKG_INSTALLED};${LAMBDA_RUNTIME_PREFIX}"
 
       - name: Build
         run: |
+          set -euxo pipefail
           cmake --build build --config Release -j
 
       - name: Locate package
         id: pkg
         run: |
-          set -e
+          set -euo pipefail
           FILE=$(ls build/*.zip 2>/dev/null | head -n1)
           if [ -z "$FILE" ]; then
             echo "No package zip found in build/" >&2

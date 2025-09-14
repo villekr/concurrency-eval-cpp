@@ -36,8 +36,7 @@ jobs:
         with:
           entrypoint: /bin/bash
           args: |
-            -lc '
-            set -euxo pipefail
+            -lc "set -euxo pipefail
             mkdir -p /github/workspace/build
             cd /github/workspace/build
             cmake -S /github/workspace \
@@ -49,7 +48,7 @@ jobs:
               -DCMAKE_CXX_COMPILER=g++
             make
             make aws-lambda-package-concurrency-eval-cpp
-            '
+            "
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4

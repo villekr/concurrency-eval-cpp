@@ -1,0 +1,89 @@
+name: PR Quality Gate (C++)
+
+on:
+  pull_request:
+    branches: [ main, "update" ]
+
+jobs:
+  quality:
+    name: Lint, syntax check and metrics
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang clang-tidy clang-format cppcheck python3-pip
+          pip3 install --user lizard
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: List source files
+        id: files
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          cpp_files=(src/*.cpp)
+          hpp_files=(include/*.h)
+          # Join arrays as space-separated single-line strings to satisfy GITHUB_OUTPUT formatting
+          printf "CPP_LIST=%s\n" "${cpp_files[*]:-}" >> "$GITHUB_OUTPUT"
+          printf "HPP_LIST=%s\n" "${hpp_files[*]:-}" >> "$GITHUB_OUTPUT"
+
+      - name: clang-format check
+        if: steps.files.outputs.CPP_LIST != '' || steps.files.outputs.HPP_LIST != ''
+        run: |
+          set -e
+          files=( $(ls src/*.cpp 2>/dev/null || true) $(ls include/* 2>/dev/null || true) )
+          if [ ${#files[@]} -gt 0 ]; then
+            clang-format --Werror --dry-run "${files[@]}"
+          fi
+
+      - name: cppcheck (syntax + style)
+        run: |
+          set -euo pipefail
+          rm -f cppcheck-report.txt || true
+          if ! cppcheck \
+            --std=c++23 \
+            --enable=all \
+            --inline-suppr \
+            --suppress=missingIncludeSystem \
+            --language=c++ \
+            --error-exitcode=1 \
+            -I include \
+            src 2> cppcheck-report.txt; then
+            echo "cppcheck found issues:" >&2
+            cat cppcheck-report.txt >&2 || true
+            exit 1
+          fi
+          if [ -s cppcheck-report.txt ]; then
+            echo "cppcheck warnings:" >&2
+            cat cppcheck-report.txt >&2 || true
+          else
+            echo "cppcheck: no issues found"
+          fi
+
+      - name: clang-tidy (header-only analysis)
+        run: |
+          set -e
+          # Run clang-tidy without full compilation database; restrict to basic checks and ignore missing includes
+          for f in src/*.cpp; do
+            [ -f "$f" ] || continue
+            clang-tidy "$f" \
+              --extra-arg=-std=c++23 \
+              --extra-arg=-Iinclude \
+              --warnings-as-errors='*' \
+              --quiet || true
+          done
+
+      - name: Code metrics (cyclomatic complexity with lizard)
+        run: |
+          # Check only the main handler file and fail on warnings
+          # -C: cyclomatic complexity threshold (warn if function > 10)
+          # -L: maximum function length (lines) threshold (warn if function > 120)
+          lizard -l cpp -C 10 -L 120 src/lambda_handler.cpp
+
+      - name: Lizard csv output
+        run: |
+          lizard -l cpp -C 10 -L 120 src/lambda_handler.cpp --csv

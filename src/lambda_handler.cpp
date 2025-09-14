@@ -9,6 +9,7 @@
 #include <aws/s3/S3Client.h>
 #include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/model/ListObjectsV2Request.h>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <future>
@@ -87,10 +88,9 @@ string processor(invocation_request const& req)
         }
 
         if (!find.empty()) {
-            for (const auto& response : responses) {
-                if (!response.empty()) {
-                    return response;
-                }
+            auto it = std::find_if(responses.begin(), responses.end(), [](const std::string& s) { return !s.empty(); });
+            if (it != responses.end()) {
+                return *it;
             }
         }
 

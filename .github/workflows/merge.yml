@@ -1,0 +1,79 @@
+name: Merge CI
+
+on:
+  push:
+    branches: [ main, "update" ]
+
+jobs:
+  package-and-upload:
+    name: Package C++ Lambda and upload to S3
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      ARTIFACT_BUCKET_NAME: ${{ vars.ARTIFACT_BUCKET_NAME || secrets.ARTIFACT_BUCKET_NAME }}
+      WRITER_ROLE_ARN: ${{ vars.WRITER_ROLE_ARN || secrets.WRITER_ROLE_ARN }}
+      AWS_REGION: ${{ vars.AWS_REGION || secrets.AWS_REGION }}
+      ARTIFACT_PREFIX: concurrency-eval-cpp
+    outputs:
+      code_s3_key: ${{ steps.upload.outputs.code_s3_key }}
+      code_s3_version: ${{ steps.upload.outputs.code_s3_version }}
+    steps:
+      - name: Validate required configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ARTIFACT_BUCKET_NAME?Define ARTIFACT_BUCKET_NAME as a Repository/Environment variable or Secret}"
+          : "${WRITER_ROLE_ARN?Define WRITER_ROLE_ARN as a Repository/Environment variable or Secret}"
+          : "${AWS_REGION?Define AWS_REGION as a Repository/Environment variable or Secret}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build (CMake inside build container)
+        uses: docker://villekr/concurrency-eval-cpp-build-container:0.1
+        with:
+          entrypoint: /bin/bash
+          args: |
+            -lc "set -euxo pipefail
+            mkdir -p /github/workspace/build
+            cd /github/workspace/build
+            cmake -S /github/workspace \
+              -DCMAKE_PREFIX_PATH=/vcpkg/installed/arm64-linux/ \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DCMAKE_INSTALL_PREFIX=/out \
+              -DCMAKE_CXX_STANDARD=23 \
+              -DCMAKE_CXX_COMPILER=g++
+            make
+            make aws-lambda-package-concurrency-eval-cpp
+            "
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.WRITER_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-artifact-upload
+
+      - id: upload
+        name: Upload artifact to S3 (capture versioned key)
+        env:
+          BUCKET: ${{ env.ARTIFACT_BUCKET_NAME }}
+          PREFIX: ${{ env.ARTIFACT_PREFIX }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ZIP_PATH="${GITHUB_WORKSPACE}/build/concurrency-eval-cpp.zip"
+          ZIP_NAME="concurrency-eval-cpp.zip"
+          FUNC_KEY="${PREFIX}/${ZIP_NAME}"
+          FUNC_VERSION_ID=$(aws s3api put-object --bucket "$BUCKET" --key "$FUNC_KEY" --body "$ZIP_PATH" --query 'VersionId' --output text)
+          echo "code_s3_key=${FUNC_KEY}" >> "$GITHUB_OUTPUT"
+          echo "code_s3_version=${FUNC_VERSION_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          echo "Artifact uploaded:" >> $GITHUB_STEP_SUMMARY
+          echo "- code_s3_key=\"${{ steps.upload.outputs.code_s3_key }}\"" >> $GITHUB_STEP_SUMMARY
+          echo "- code_s3_version=\"${{ steps.upload.outputs.code_s3_version }}\"" >> $GITHUB_STEP_SUMMARY

@@ -45,7 +45,7 @@ void invoke_lambda_handler()
         event_payload.WithString("find", find);
         string const event_payload_str = event_payload.View().WriteCompact();
 
-        request.payload = event_payload.View().WriteCompact();
+        request.payload = event_payload_str;
         auto response_with_find = lambda_handler(request);
         cout << "Response: " << response_with_find.get_payload() << endl;
     }

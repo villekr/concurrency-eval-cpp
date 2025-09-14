@@ -85,17 +85,6 @@ jobs:
           set -euxo pipefail
           cmake --build build --config Release -j
 
-      - name: Locate package
-        id: pkg
-        run: |
-          set -euo pipefail
-          FILE=$(ls build/*.zip 2>/dev/null | head -n1)
-          if [ -z "$FILE" ]; then
-            echo "No package zip found in build/" >&2
-            exit 1
-          fi
-          echo "zip=$FILE" >> $GITHUB_OUTPUT
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -110,8 +99,8 @@ jobs:
           PREFIX: ${{ env.ARTIFACT_PREFIX }}
         run: |
           set -euxo pipefail
-          ZIP_PATH="${{ steps.pkg.outputs.zip }}"
-          ZIP_NAME="$(basename "$ZIP_PATH")"
+          ZIP_PATH="build/concurrency-eval-cpp.zip"
+          ZIP_NAME="concurrency-eval-cpp.zip"
           FUNC_KEY="${PREFIX}/${ZIP_NAME}"
           FUNC_VERSION_ID=$(aws s3api put-object --bucket "$BUCKET" --key "$FUNC_KEY" --body "$ZIP_PATH" --query 'VersionId' --output text)
           echo "code_s3_key=${FUNC_KEY}" >> "$GITHUB_OUTPUT"

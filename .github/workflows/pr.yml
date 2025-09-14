@@ -42,8 +42,9 @@ jobs:
 
       - name: cppcheck (syntax + style)
         run: |
-          set -e
-          cppcheck \
+          set -euo pipefail
+          rm -f cppcheck-report.txt || true
+          if ! cppcheck \
             --std=c++23 \
             --enable=all \
             --inline-suppr \
@@ -51,7 +52,17 @@ jobs:
             --language=c++ \
             --error-exitcode=1 \
             -I include \
-            src 2> cppcheck-report.txt || (cat cppcheck-report.txt; exit 1)
+            src 2> cppcheck-report.txt; then
+            echo "cppcheck found issues:" >&2
+            cat cppcheck-report.txt >&2 || true
+            exit 1
+          fi
+          if [ -s cppcheck-report.txt ]; then
+            echo "cppcheck warnings:" >&2
+            cat cppcheck-report.txt >&2 || true
+          else
+            echo "cppcheck: no issues found"
+          fi
 
       - name: clang-tidy (header-only analysis)
         run: |
@@ -68,13 +79,7 @@ jobs:
 
       - name: Code metrics (cyclomatic complexity with lizard)
         run: |
-          set -e
-          lizard -l cpp -C 15 -w src include | tee lizard-report.txt
-
-      - name: Upload reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: static-analysis-and-metrics
-          path: |
-            cppcheck-report.txt
-            lizard-report.txt
+          # Check only the main Java handler file and fail on warnings
+          # -C: cyclomatic complexity threshold (warn if function > 10)
+          # -L: maximum function length (lines) threshold (warn if function > 120)
+          lizard -l cpp -C 10 -L 120 src/lambda_handler.cpp

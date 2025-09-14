@@ -37,8 +37,7 @@ jobs:
         run: |
           set -euxo pipefail
           cd "$GITHUB_WORKSPACE"
-          mkdir -p build
-          cd build
+          cd /app && mkdir build && cd build
           cmake .. \
               -DCMAKE_PREFIX_PATH=/vcpkg/installed/arm64-linux/ \
               -DCMAKE_BUILD_TYPE=Release \
@@ -46,7 +45,7 @@ jobs:
               -DCMAKE_INSTALL_PREFIX=/out \
               -DCMAKE_CXX_STANDARD=23 \
               -DCMAKE_CXX_COMPILER=g++
-          make -j
+          make
           make aws-lambda-package-concurrency-eval-cpp
 
       - name: Configure AWS credentials (OIDC)
@@ -64,7 +63,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          ZIP_PATH="${GITHUB_WORKSPACE}/build/concurrency-eval-cpp.zip"
+          ZIP_PATH="${GITHUB_WORKSPACE}/app/build/concurrency-eval-cpp.zip"
           ZIP_NAME="concurrency-eval-cpp.zip"
           FUNC_KEY="${PREFIX}/${ZIP_NAME}"
           FUNC_VERSION_ID=$(aws s3api put-object --bucket "$BUCKET" --key "$FUNC_KEY" --body "$ZIP_PATH" --query 'VersionId' --output text)

@@ -1,4 +1,5 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.5)
+set(CMAKE_CXX_STANDARD 11)
 project(concurrency-eval-cpp LANGUAGES CXX)
 
 # Enforce latest C++ standard per requirements

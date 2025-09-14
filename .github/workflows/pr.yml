@@ -83,3 +83,7 @@ jobs:
           # -C: cyclomatic complexity threshold (warn if function > 10)
           # -L: maximum function length (lines) threshold (warn if function > 120)
           lizard -l cpp -C 10 -L 120 src/lambda_handler.cpp
+
+      - name: Lizard csv output
+        run: |
+          lizard -l cpp -C 10 -L 120 src/lambda_handler.cpp --csv

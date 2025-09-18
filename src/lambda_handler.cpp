@@ -41,23 +41,23 @@ string get(S3Client& s3_client, const Aws::String& object_key, const Aws::String
                 // discard
             }
             return {};
-        } else {
-            // Build a single std::string (no intermediate stringstream copy). Reserve if ContentLength is known.
-            std::string body;
-            auto len = get_object_outcome.GetResult().GetContentLength();
-            if (len > 0 && static_cast<unsigned long long>(len) < std::numeric_limits<size_t>::max()) {
-                body.reserve(static_cast<size_t>(len));
-            }
-            body.assign(std::istreambuf_iterator<char>(body_stream), std::istreambuf_iterator<char>());
-
-            if (!body.empty()) {
-                std::size_t found = body.find(find);
-                if (found != std::string::npos) {
-                    return object_key.c_str();
-                }
-            }
-            return {};
         }
+
+        // Build a single std::string (no intermediate stringstream copy). Reserve if ContentLength is known.
+        std::string body;
+        auto len = get_object_outcome.GetResult().GetContentLength();
+        if (len > 0 && static_cast<unsigned long long>(len) < std::numeric_limits<size_t>::max()) {
+            body.reserve(static_cast<size_t>(len));
+        }
+        body.assign(std::istreambuf_iterator<char>(body_stream), std::istreambuf_iterator<char>());
+
+        if (!body.empty()) {
+            std::size_t found = body.find(find);
+            if (found != std::string::npos) {
+                return object_key.c_str();
+            }
+        }
+        return {};
     }
 
     throw std::runtime_error(
@@ -86,7 +86,8 @@ string processor(invocation_request const& req)
                 if (v >= 1 && v <= 256) {
                     concurrency_limit = static_cast<unsigned int>(v);
                 }
-            } catch (...) {
+            }
+            catch (...) {
                 // ignore parse errors, keep default
             }
         }

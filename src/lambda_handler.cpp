@@ -32,8 +32,7 @@ using namespace Aws::S3;
 // Simple fixed-size thread pool for std::string tasks
 class ThreadPool {
 public:
-    explicit ThreadPool(size_t thread_count)
-        : stop(false)
+    explicit ThreadPool(size_t thread_count) : stop(false)
     {
         if (thread_count == 0) {
             thread_count = 1;

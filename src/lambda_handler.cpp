@@ -16,6 +16,11 @@
 #include <thread>
 #include <vector>
 #include <limits>
+#include <condition_variable>
+#include <mutex>
+#include <queue>
+#include <functional>
+#include <memory>
 
 using namespace std;
 using namespace aws::lambda_runtime;
@@ -24,7 +29,88 @@ using namespace Aws::Utils::Json;
 using namespace Aws::S3::Model;
 using namespace Aws::S3;
 
-string get(S3Client& s3_client, const Aws::String& object_key, const Aws::String& from_bucket, const string& find)
+// Simple fixed-size thread pool for std::string tasks
+class ThreadPool {
+public:
+    explicit ThreadPool(size_t thread_count)
+        : stop(false)
+    {
+        if (thread_count == 0) thread_count = 1;
+        workers.reserve(thread_count);
+        for (size_t i = 0; i < thread_count; ++i) {
+            workers.emplace_back([this]() {
+                for (;;) {
+                    std::packaged_task<std::string()> task;
+                    {
+                        std::unique_lock<std::mutex> lock(mtx);
+                        cv.wait(lock, [this]() { return stop || !tasks.empty(); });
+                        if (stop && tasks.empty()) return;
+                        task = std::move(tasks.front());
+                        tasks.pop();
+                    }
+                    try {
+                        task();
+                    }
+                    catch (...) {
+                        // packaged_task will propagate exceptions to the future
+                    }
+                }
+            });
+        }
+    }
+
+    std::future<std::string> enqueue(std::function<std::string()> fn)
+    {
+        std::packaged_task<std::string()> task(std::move(fn));
+        auto fut = task.get_future();
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            tasks.emplace(std::move(task));
+        }
+        cv.notify_one();
+        return fut;
+    }
+
+    ~ThreadPool()
+    {
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            stop = true;
+        }
+        cv.notify_all();
+        for (auto& t : workers) {
+            if (t.joinable()) t.join();
+        }
+    }
+
+private:
+    std::vector<std::thread> workers;
+    std::queue<std::packaged_task<std::string()>> tasks;
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool stop;
+};
+
+static S3Client& get_shared_s3_client(unsigned int concurrency_limit)
+{
+    static std::mutex s3_mtx;
+    static std::unique_ptr<S3Client> client;
+    std::lock_guard<std::mutex> lock(s3_mtx);
+    if (!client) {
+        Aws::Client::ClientConfiguration config;
+        config.region = Aws::Environment::GetEnv("AWS_REGION");
+        config.caFile = Aws::Environment::GetEnv("CA_BUNDLE_FILEPATH");
+        config.maxConnections = static_cast<long>(concurrency_limit);
+        config.enableTcpKeepAlive = true;
+        config.tcpKeepAliveIntervalMs = 30000; // 30s
+        config.connectTimeoutMs = 5000;
+        config.requestTimeoutMs = 300000; // 5 minutes
+        client = std::make_unique<S3Client>(config);
+    }
+    return *client;
+}
+
+string get(S3Client& s3_client, const Aws::String& object_key, const Aws::String& from_bucket, const Aws::String& find)
 {
     GetObjectRequest object_request;
     object_request.WithBucket(from_bucket).WithKey(object_key);
@@ -43,16 +129,30 @@ string get(S3Client& s3_client, const Aws::String& object_key, const Aws::String
             return {};
         }
 
-        // Build a single std::string (no intermediate stringstream copy). Reserve if ContentLength is known.
+        // Build a single std::string efficiently. If ContentLength is known, do a single read; otherwise, read in chunks.
         std::string body;
         auto len = get_object_outcome.GetResult().GetContentLength();
         if (len > 0 && static_cast<unsigned long long>(len) < std::numeric_limits<size_t>::max()) {
-            body.reserve(static_cast<size_t>(len));
+            body.resize(static_cast<size_t>(len));
+            body_stream.read(body.data(), body.size());
+            auto read_bytes = static_cast<size_t>(body_stream.gcount());
+            if (read_bytes < body.size()) {
+                body.resize(read_bytes);
+            }
+        } else {
+            const size_t CHUNK = 64 * 1024;
+            std::vector<char> buffer;
+            buffer.resize(CHUNK);
+            for (;;) {
+                body_stream.read(buffer.data(), buffer.size());
+                std::streamsize got = body_stream.gcount();
+                if (got <= 0) break;
+                body.append(buffer.data(), static_cast<size_t>(got));
+            }
         }
-        body.assign(std::istreambuf_iterator<char>(body_stream), std::istreambuf_iterator<char>());
 
         if (!body.empty()) {
-            std::size_t found = body.find(find);
+            std::size_t found = body.find(find.c_str());
             if (found != std::string::npos) {
                 return object_key.c_str();
             }
@@ -93,28 +193,26 @@ string processor(invocation_request const& req)
         }
     }
 
-    Aws::Client::ClientConfiguration config;
-    config.region = Aws::Environment::GetEnv("AWS_REGION");
-    config.caFile = Aws::Environment::GetEnv("CA_BUNDLE_FILEPATH");
-    config.maxConnections = static_cast<long>(concurrency_limit); // align HTTP pool with our concurrency
-
-    S3Client s3_client(config);
+    S3Client& s3_client = get_shared_s3_client(concurrency_limit);
     ListObjectsV2Request objects_request;
     objects_request.WithBucket(bucket_name).WithPrefix(folder);
 
     auto list_objects_outcome = s3_client.ListObjectsV2(objects_request);
 
     if (list_objects_outcome.IsSuccess()) {
-        auto objects = list_objects_outcome.GetResult().GetContents();
+        const auto& objects = list_objects_outcome.GetResult().GetContents();
 
         const bool do_find = !find.empty();
         size_t n = objects.size();
+
+        // Thread pool reused across all batches
+        ThreadPool pool(concurrency_limit);
 
         // Track earliest matching key by list order without keeping all responses
         size_t best_index = std::numeric_limits<size_t>::max();
         std::string best_key;
 
-        // Process in bounded batches to limit threads and memory
+        // Process in bounded batches to limit outstanding tasks and futures
         for (size_t start = 0; start < n; start += concurrency_limit) {
             size_t end = std::min(n, start + concurrency_limit);
 
@@ -123,7 +221,7 @@ string processor(invocation_request const& req)
 
             for (size_t i = start; i < end; ++i) {
                 auto object_key = objects[i].GetKey();
-                futures.push_back(std::async(std::launch::async, [bucket_name, object_key, &s3_client, find]() {
+                futures.push_back(pool.enqueue([&s3_client, bucket_name, object_key, find]() {
                     return get(s3_client, object_key, bucket_name, find);
                 }));
             }

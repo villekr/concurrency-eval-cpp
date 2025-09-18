@@ -35,7 +35,9 @@ public:
     explicit ThreadPool(size_t thread_count)
         : stop(false)
     {
-        if (thread_count == 0) thread_count = 1;
+        if (thread_count == 0) {
+            thread_count = 1;
+        }
         workers.reserve(thread_count);
         for (size_t i = 0; i < thread_count; ++i) {
             workers.emplace_back([this]() {
@@ -44,7 +46,9 @@ public:
                     {
                         std::unique_lock<std::mutex> lock(mtx);
                         cv.wait(lock, [this]() { return stop || !tasks.empty(); });
-                        if (stop && tasks.empty()) return;
+                        if (stop && tasks.empty()) {
+                            return;
+                        }
                         task = std::move(tasks.front());
                         tasks.pop();
                     }
@@ -79,7 +83,9 @@ public:
         }
         cv.notify_all();
         for (auto& t : workers) {
-            if (t.joinable()) t.join();
+            if (t.joinable()) {
+                t.join();
+            }
         }
     }
 
@@ -129,7 +135,8 @@ string get(S3Client& s3_client, const Aws::String& object_key, const Aws::String
             return {};
         }
 
-        // Build a single std::string efficiently. If ContentLength is known, do a single read; otherwise, read in chunks.
+        // Build a single std::string efficiently. If ContentLength is known, do a single read;
+        // otherwise, read in chunks.
         std::string body;
         auto len = get_object_outcome.GetResult().GetContentLength();
         if (len > 0 && static_cast<unsigned long long>(len) < std::numeric_limits<size_t>::max()) {
@@ -139,14 +146,17 @@ string get(S3Client& s3_client, const Aws::String& object_key, const Aws::String
             if (read_bytes < body.size()) {
                 body.resize(read_bytes);
             }
-        } else {
+        }
+        else {
             const size_t CHUNK = 64 * 1024;
             std::vector<char> buffer;
             buffer.resize(CHUNK);
             for (;;) {
                 body_stream.read(buffer.data(), buffer.size());
                 std::streamsize got = body_stream.gcount();
-                if (got <= 0) break;
+                if (got <= 0) {
+                    break;
+                }
                 body.append(buffer.data(), static_cast<size_t>(got));
             }
         }

@@ -82,9 +82,9 @@ string processor(invocation_request const& req)
         auto env_val = Aws::Environment::GetEnv("MAX_CONCURRENCY");
         if (!env_val.empty()) {
             try {
-                unsigned long v = std::stoul(env_val.c_str());
-                if (v >= 1 && v <= 256) {
-                    concurrency_limit = static_cast<unsigned int>(v);
+                unsigned long parsed_limit = std::stoul(env_val.c_str());
+                if (parsed_limit >= 1 && parsed_limit <= 256) {
+                    concurrency_limit = static_cast<unsigned int>(parsed_limit);
                 }
             }
             catch (...) {

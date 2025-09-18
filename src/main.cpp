@@ -12,7 +12,7 @@ using namespace Aws;
 int main()
 {
     SDKOptions options;
-    options.loggingOptions.logLevel = LogLevel::Info;
+    options.loggingOptions.logLevel = LogLevel::Error;
     InitAPI(options);
     {
         auto handler_fn = [](invocation_request const& req) { return lambda_handler(req); };

@@ -185,14 +185,14 @@ string processor(invocation_request const& req)
 
     // Determine concurrency limit: env MAX_CONCURRENCY or a sensible default for I/O-bound workloads
     unsigned int hw = std::thread::hardware_concurrency();
-    unsigned int default_limit = std::min(32u, std::max(4u, hw ? 2u * hw : 8u));
+    unsigned int default_limit = std::min(128u, std::max(8u, hw ? 4u * hw : 16u));
     unsigned int concurrency_limit = default_limit;
     {
         auto env_val = Aws::Environment::GetEnv("MAX_CONCURRENCY");
         if (!env_val.empty()) {
             try {
                 unsigned long parsed_limit = std::stoul(env_val.c_str());
-                if (parsed_limit >= 1 && parsed_limit <= 256) {
+                if (parsed_limit >= 1 && parsed_limit <= 1024) {
                     concurrency_limit = static_cast<unsigned int>(parsed_limit);
                 }
             }
@@ -221,27 +221,56 @@ string processor(invocation_request const& req)
         size_t best_index = std::numeric_limits<size_t>::max();
         std::string best_key;
 
-        // Process in bounded batches to limit outstanding tasks and futures
-        for (size_t start = 0; start < n; start += concurrency_limit) {
-            size_t end = std::min(n, start + concurrency_limit);
+        // Sliding-window scheduling to keep the pool saturated without batch barriers
+        size_t next = 0;
+        std::vector<std::future<std::string>> futures;
+        std::vector<size_t> future_indices; // track original object indices for first-match selection
+        futures.reserve(std::min(concurrency_limit, static_cast<unsigned int>(n)));
+        future_indices.reserve(std::min(concurrency_limit, static_cast<unsigned int>(n)));
 
-            std::vector<std::future<std::string>> futures;
-            futures.reserve(end - start);
+        auto submit = [&](size_t i) {
+            auto object_key = objects[i].GetKey();
+            futures.push_back(pool.enqueue([&s3_client, bucket_name, object_key, find]() {
+                return get(s3_client, object_key, bucket_name, find);
+            }));
+            future_indices.push_back(i);
+        };
 
-            for (size_t i = start; i < end; ++i) {
-                auto object_key = objects[i].GetKey();
-                futures.push_back(pool.enqueue([&s3_client, bucket_name, object_key, find]() {
-                    return get(s3_client, object_key, bucket_name, find);
-                }));
-            }
+        // Prime the window
+        for (; next < n && futures.size() < concurrency_limit; ++next) {
+            submit(next);
+        }
 
-            // Collect in list order for deterministic "first" selection
-            for (size_t i = start; i < end; ++i) {
-                std::string r = futures[i - start].get();
-                if (do_find && !r.empty() && i < best_index) {
-                    best_index = i;
-                    best_key = std::move(r);
+        // As futures complete, enqueue more work until all submitted; drain the rest
+        while (!futures.empty()) {
+            bool progressed = false;
+            for (size_t j = 0; j < futures.size(); ++j) {
+                if (futures[j].wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+                    std::string r = futures[j].get();
+                    size_t idx = future_indices[j];
+                    if (do_find && !r.empty() && idx < best_index) {
+                        best_index = idx;
+                        best_key = std::move(r);
+                    }
+                    // Remove this future by swapping with the back for O(1) erase
+                    if (j + 1 != futures.size()) {
+                        std::swap(futures[j], futures.back());
+                        std::swap(future_indices[j], future_indices.back());
+                    }
+                    futures.pop_back();
+                    future_indices.pop_back();
+
+                    // Enqueue next task if available
+                    if (next < n) {
+                        submit(next++);
+                    }
+                    progressed = true;
+                    break;
                 }
+            }
+            if (!progressed) {
+                // Avoid busy spin if nothing completed yet
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
 

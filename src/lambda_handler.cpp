@@ -15,6 +15,7 @@
 #include <future>
 #include <thread>
 #include <vector>
+#include <limits>
 
 using namespace std;
 using namespace aws::lambda_runtime;
@@ -32,17 +33,30 @@ string get(S3Client& s3_client, const Aws::String& object_key, const Aws::String
 
     if (get_object_outcome.IsSuccess()) {
         auto& body_stream = get_object_outcome.GetResult().GetBody();
-        stringstream ss;
-        ss << body_stream.rdbuf();
 
-        if (!find.empty()) {
-            std::string body = ss.str();
+        if (find.empty()) {
+            // Fully consume the stream but do not store it to minimize memory footprint
+            char buffer[8192];
+            while (body_stream.read(buffer, sizeof(buffer)) || body_stream.gcount() > 0) {
+                // discard
+            }
+            return {};
+        }
+
+        // Build a single std::string (no intermediate stringstream copy). Reserve if ContentLength is known.
+        std::string body;
+        auto len = get_object_outcome.GetResult().GetContentLength();
+        if (len > 0 && static_cast<unsigned long long>(len) < std::numeric_limits<size_t>::max()) {
+            body.reserve(static_cast<size_t>(len));
+        }
+        body.assign(std::istreambuf_iterator<char>(body_stream), std::istreambuf_iterator<char>());
+
+        if (!body.empty()) {
             std::size_t found = body.find(find);
             if (found != std::string::npos) {
                 return object_key.c_str();
             }
         }
-
         return {};
     }
 
@@ -60,9 +74,29 @@ string processor(invocation_request const& req)
     auto folder = v.GetString("folder");
     auto find = v.GetString("find");
 
+    // Determine concurrency limit: env MAX_CONCURRENCY or a sensible default for I/O-bound workloads
+    unsigned int hw = std::thread::hardware_concurrency();
+    unsigned int default_limit = std::min(32u, std::max(4u, hw ? 2u * hw : 8u));
+    unsigned int concurrency_limit = default_limit;
+    {
+        auto env_val = Aws::Environment::GetEnv("MAX_CONCURRENCY");
+        if (!env_val.empty()) {
+            try {
+                unsigned long parsed_limit = std::stoul(env_val.c_str());
+                if (parsed_limit >= 1 && parsed_limit <= 256) {
+                    concurrency_limit = static_cast<unsigned int>(parsed_limit);
+                }
+            }
+            catch (...) {
+                // ignore parse errors, keep default
+            }
+        }
+    }
+
     Aws::Client::ClientConfiguration config;
     config.region = Aws::Environment::GetEnv("AWS_REGION");
     config.caFile = Aws::Environment::GetEnv("CA_BUNDLE_FILEPATH");
+    config.maxConnections = static_cast<long>(concurrency_limit); // align HTTP pool with our concurrency
 
     S3Client s3_client(config);
     ListObjectsV2Request objects_request;
@@ -72,29 +106,44 @@ string processor(invocation_request const& req)
 
     if (list_objects_outcome.IsSuccess()) {
         auto objects = list_objects_outcome.GetResult().GetContents();
-        vector<future<string>> futures;
-        vector<string> responses;
-        responses.resize(objects.size());
 
-        for (const auto& object : objects) {
-            auto object_key = object.GetKey();
-            futures.push_back(async(launch::async, [bucket_name, object_key, &s3_client, find]() {
-                return get(s3_client, object_key, bucket_name, find);
-            }));
-        }
+        const bool do_find = !find.empty();
+        size_t n = objects.size();
 
-        for (size_t i = 0; i < objects.size(); ++i) {
-            responses[i] = futures[i].get();
-        }
+        // Track earliest matching key by list order without keeping all responses
+        size_t best_index = std::numeric_limits<size_t>::max();
+        std::string best_key;
 
-        if (!find.empty()) {
-            auto it = std::find_if(responses.begin(), responses.end(), [](const std::string& s) { return !s.empty(); });
-            if (it != responses.end()) {
-                return *it;
+        // Process in bounded batches to limit threads and memory
+        for (size_t start = 0; start < n; start += concurrency_limit) {
+            size_t end = std::min(n, start + concurrency_limit);
+
+            std::vector<std::future<std::string>> futures;
+            futures.reserve(end - start);
+
+            for (size_t i = start; i < end; ++i) {
+                auto object_key = objects[i].GetKey();
+                futures.push_back(std::async(std::launch::async, [bucket_name, object_key, &s3_client, find]() {
+                    return get(s3_client, object_key, bucket_name, find);
+                }));
+            }
+
+            // Collect in list order for deterministic "first" selection
+            for (size_t i = start; i < end; ++i) {
+                std::string r = futures[i - start].get();
+                if (do_find && !r.empty() && i < best_index) {
+                    best_index = i;
+                    best_key = std::move(r);
+                }
             }
         }
 
-        return to_string(responses.size());
+        if (do_find && best_index != std::numeric_limits<size_t>::max()) {
+            return best_key;
+        }
+
+        // Ensure all bodies were fully read; return the number of listed objects
+        return std::to_string(n);
     }
 
     throw runtime_error(

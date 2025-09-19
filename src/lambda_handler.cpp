@@ -226,7 +226,8 @@ string processor(invocation_request const& req)
         // Sliding-window scheduling to keep the pool saturated without batch barriers
         size_t next = 0;
         std::vector<std::future<std::string>> futures;
-        std::vector<size_t> future_indices; // track original object indices for first-match selection (only used if do_find)
+        // Track original object indices for first-match selection (only used if do_find).
+        std::vector<size_t> future_indices;
         futures.reserve(std::min(concurrency_limit, static_cast<unsigned int>(n)));
         if (do_find) {
             future_indices.reserve(std::min(concurrency_limit, static_cast<unsigned int>(n)));

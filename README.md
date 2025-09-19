@@ -36,11 +36,18 @@ func get(s3_key, find):
     return body.find(find) if find else None
 ```
 
+## Docker builder image
+
+GitHub action used docker image for building. Build and push to Docker Hub if any changes are made to the Dockerfile.
+```
+docker build -f docker/Dockerfile -t villekr/concurrency-eval-cpp-build-container:0.3 .
+docker push villekr/concurrency-eval-cpp-build-container:0.3
+```
+
 ## Build deployment package locally
 
 ```
-docker build -f docker/Dockerfile -t villekr/concurrency-eval-cpp-build-container .
-docker run -it --rm -v $(pwd):/builder concurrency-eval-cpp bash
+docker run -it --rm -v $(pwd):/builder villekr/concurrency-eval-cpp-build-container:0.3 bash
 cd builder && mkdir build && cd build
 cmake ..  \
     -DCMAKE_PREFIX_PATH=/vcpkg/installed/arm64-linux/ \
@@ -57,10 +64,7 @@ make
 make aws-lambda-package-concurrency-eval-cpp
 ```
 
-## Docker builder image
+Note:
+- Local container build writes the ZIP to /builder/build inside the container. On the host, the same file appears at ./build/concurrency-eval-cpp.zip.
+- In GitHub Actions, the build runs inside the container at /github/workspace/build; on the runner host it is available at ${GITHUB_WORKSPACE}/build/concurrency-eval-cpp.zip. The upload step must use the host path (${GITHUB_WORKSPACE}), not the container path (/github/workspace).
 
-GitHub action used docker image for building. Build and push to Docker Hub if any changes are made to the Dockerfile.
-```
-docker build -f docker/Dockerfile -t villekr/concurrency-eval-cpp-build-container:<major.minor> .
-docker push villekr/concurrency-eval-cpp-build-container:<major.minor> 
-```

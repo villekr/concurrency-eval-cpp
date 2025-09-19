@@ -58,7 +58,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          ls -al /github/workspace/build || true
+          ls -al "${GITHUB_WORKSPACE}/build" || true
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4

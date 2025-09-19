@@ -54,6 +54,12 @@ jobs:
             make aws-lambda-package-concurrency-eval-cpp
             "
 
+      - name: List build directory
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ls -al /github/workspace/build || true
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:

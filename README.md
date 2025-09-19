@@ -11,6 +11,7 @@ Mandatory requirements:
   - processor: List objects from a specified S3 bucket and process them concurrently/parallel
   - get: Get a single object's body from S3, try to find a string if specified
 - The processor-function must be encapsulated with timing functions
+- S3 bucket will contain at maximum 1000 objects
 - Each S3 objects' body must be fully read
 - Code must return at least the following attributes as lambda handler response:
   - time (float): duration as float in seconds rounded to one decimal place
@@ -47,7 +48,19 @@ cmake ..  \
     -DBUILD_SHARED_LIBS=OFF \
     -DCMAKE_INSTALL_PREFIX=/out \
     -DCMAKE_CXX_STANDARD=23 \
-    -DCMAKE_CXX_COMPILER=g++
+    -DCMAKE_CXX_COMPILER=g++ \
+    -DENABLE_LTO=ON \
+    -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE \
+    -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -ffunction-sections -fdata-sections -flto" \
+    -DCMAKE_EXE_LINKER_FLAGS_RELEASE="-Wl,--gc-sections -Wl,--as-needed"    
 make
 make aws-lambda-package-concurrency-eval-cpp
+```
+
+## Docker builder image
+
+GitHub action used docker image for building. Build and push to Docker Hub if any changes are made to the Dockerfile.
+```
+docker build -f docker/Dockerfile -t villekr/concurrency-eval-cpp-build-container:<major.minor> .
+docker push villekr/concurrency-eval-cpp-build-container:<major.minor> 
 ```

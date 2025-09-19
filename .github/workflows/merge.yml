@@ -36,7 +36,7 @@ jobs:
         with:
           entrypoint: /bin/bash
           args: |
-            -lc "set -euxo pipefail
+            -lc 'set -euxo pipefail
             mkdir -p /github/workspace/build
             cd /github/workspace/build
             cmake -S /github/workspace \
@@ -52,7 +52,7 @@ jobs:
               -DCMAKE_EXE_LINKER_FLAGS_RELEASE="-Wl,--gc-sections -Wl,--as-needed"
             make
             make aws-lambda-package-concurrency-eval-cpp
-            "
+            '
 
       - name: List build directory
         shell: bash
@@ -78,7 +78,7 @@ jobs:
           ZIP_PATH="${GITHUB_WORKSPACE}/build/concurrency-eval-cpp.zip"
           ZIP_NAME="concurrency-eval-cpp.zip"
           FUNC_KEY="${PREFIX}/${ZIP_NAME}"
-          FUNC_VERSION_ID=$(aws s3api put-object --bucket "$BUCKET" --key "$FUNC_KEY" --body "$ZIP_PATH" --query 'VersionId' --output text)
+          FUNC_VERSION_ID=$(aws s3api put-object --bucket "$BUCKET" --key "$FUNC_KEY" --body "fileb://$ZIP_PATH" --query 'VersionId' --output text)
           echo "code_s3_key=${FUNC_KEY}" >> "$GITHUB_OUTPUT"
           echo "code_s3_version=${FUNC_VERSION_ID}" >> "$GITHUB_OUTPUT"
 

@@ -205,6 +205,8 @@ string processor(invocation_request const& req)
     S3Client& s3_client = get_shared_s3_client(concurrency_limit);
     ListObjectsV2Request objects_request;
     objects_request.WithBucket(bucket_name).WithPrefix(folder);
+    // Explicitly cap to 1000 as per requirement; avoids pagination and clarifies intent
+    objects_request.SetMaxKeys(1000);
 
     auto list_objects_outcome = s3_client.ListObjectsV2(objects_request);
 
@@ -217,23 +219,27 @@ string processor(invocation_request const& req)
         // Thread pool reused across all batches
         ThreadPool pool(concurrency_limit);
 
-        // Track earliest matching key by list order without keeping all responses
+        // Select first matching key strictly by S3 list order per README; skip matching when no 'find' is provided
         size_t best_index = std::numeric_limits<size_t>::max();
         std::string best_key;
 
         // Sliding-window scheduling to keep the pool saturated without batch barriers
         size_t next = 0;
         std::vector<std::future<std::string>> futures;
-        std::vector<size_t> future_indices; // track original object indices for first-match selection
+        std::vector<size_t> future_indices; // track original object indices for first-match selection (only used if do_find)
         futures.reserve(std::min(concurrency_limit, static_cast<unsigned int>(n)));
-        future_indices.reserve(std::min(concurrency_limit, static_cast<unsigned int>(n)));
+        if (do_find) {
+            future_indices.reserve(std::min(concurrency_limit, static_cast<unsigned int>(n)));
+        }
 
         auto submit = [&](size_t i) {
             auto object_key = objects[i].GetKey();
             futures.push_back(pool.enqueue([&s3_client, bucket_name, object_key, find]() {
                 return get(s3_client, object_key, bucket_name, find);
             }));
-            future_indices.push_back(i);
+            if (do_find) {
+                future_indices.push_back(i);
+            }
         };
 
         // Prime the window
@@ -247,18 +253,24 @@ string processor(invocation_request const& req)
             for (size_t j = 0; j < futures.size(); ++j) {
                 if (futures[j].wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
                     std::string r = futures[j].get();
-                    size_t idx = future_indices[j];
-                    if (do_find && !r.empty() && idx < best_index) {
-                        best_index = idx;
-                        best_key = std::move(r);
+                    if (do_find) {
+                        size_t idx = future_indices[j];
+                        if (!r.empty() && idx < best_index) {
+                            best_index = idx;
+                            best_key = std::move(r);
+                        }
                     }
                     // Remove this future by swapping with the back for O(1) erase
                     if (j + 1 != futures.size()) {
                         std::swap(futures[j], futures.back());
-                        std::swap(future_indices[j], future_indices.back());
+                        if (do_find) {
+                            std::swap(future_indices[j], future_indices.back());
+                        }
                     }
                     futures.pop_back();
-                    future_indices.pop_back();
+                    if (do_find) {
+                        future_indices.pop_back();
+                    }
 
                     // Enqueue next task if available
                     if (next < n) {
@@ -274,8 +286,11 @@ string processor(invocation_request const& req)
             }
         }
 
-        if (do_find && best_index != std::numeric_limits<size_t>::max()) {
-            return best_key;
+        if (do_find) {
+            if (best_index != std::numeric_limits<size_t>::max()) {
+                return best_key;
+            }
+            return "None";
         }
 
         // Ensure all bodies were fully read; return the number of listed objects

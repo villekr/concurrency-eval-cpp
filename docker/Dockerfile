@@ -24,8 +24,11 @@ RUN cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIBS=OFF \
     -DCMAKE_INSTALL_PREFIX=/out \
-    -DCMAKE_CXX_COMPILER=g++
-RUN make && make install
+    -DCMAKE_CXX_COMPILER=g++ \
+    -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE \
+    -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -ffunction-sections -fdata-sections -flto" \
+    -DCMAKE_EXE_LINKER_FLAGS_RELEASE="-Wl,--gc-sections -Wl,--as-needed"
+RUN make -j"$(nproc)" && make install
 
 WORKDIR /
 

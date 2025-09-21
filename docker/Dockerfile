@@ -28,7 +28,7 @@ RUN cmake .. \
     -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE \
     -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -ffunction-sections -fdata-sections -flto" \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="-Wl,--gc-sections -Wl,--as-needed"
-RUN make -j"$(nproc)" && make install
+RUN make && make install
 
 WORKDIR /
 

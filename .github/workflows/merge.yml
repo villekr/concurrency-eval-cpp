@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build (CMake inside build container)
-        uses: docker://villekr/concurrency-eval-cpp-build-container:0.2
+        uses: docker://villekr/concurrency-eval-cpp-build-container:0.3
         with:
           entrypoint: /bin/bash
           args: |
@@ -48,11 +48,17 @@ jobs:
               -DCMAKE_CXX_COMPILER=g++ \
               -DENABLE_LTO=ON \
               -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE \
-              -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -ffunction-sections -fdata-sections -flto" \
-              -DCMAKE_EXE_LINKER_FLAGS_RELEASE="-Wl,--gc-sections -Wl,--as-needed"
+              -DCMAKE_CXX_FLAGS_RELEASE=-O3\ -DNDEBUG\ -ffunction-sections\ -fdata-sections\ -flto \
+              -DCMAKE_EXE_LINKER_FLAGS_RELEASE=-Wl,--gc-sections\ -Wl,--as-needed
             make
             make aws-lambda-package-concurrency-eval-cpp
             "
+
+#      - name: List build directory
+#        shell: bash
+#        run: |
+#          set -euxo pipefail
+#          ls -al "${GITHUB_WORKSPACE}/build" || true
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4

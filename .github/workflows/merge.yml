@@ -2,7 +2,7 @@ name: Merge CI
 
 on:
   push:
-    branches: [ main, "perf-tweak6" ]
+    branches: [ main ]
 
 jobs:
   package-and-upload:
@@ -54,11 +54,11 @@ jobs:
             make aws-lambda-package-concurrency-eval-cpp
             "
 
-      - name: List build directory
-        shell: bash
-        run: |
-          set -euxo pipefail
-          ls -al "${GITHUB_WORKSPACE}/build" || true
+#      - name: List build directory
+#        shell: bash
+#        run: |
+#          set -euxo pipefail
+#          ls -al "${GITHUB_WORKSPACE}/build" || true
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4

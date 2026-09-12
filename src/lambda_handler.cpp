@@ -183,9 +183,26 @@ string processor(invocation_request const& req)
     auto folder = v.GetString("folder");
     auto find = v.GetString("find");
 
-    // Determine concurrency limit: env MAX_CONCURRENCY or a sensible default for I/O-bound workloads
-    unsigned int hw = std::thread::hardware_concurrency();
-    unsigned int default_limit = std::min(128u, std::max(8u, hw ? 4u * hw : 16u));
+    // Determine concurrency limit. Default matches the shared cross-language formula:
+    //   cap = max(8, min(64, memory_MB / 32))
+    // where memory_MB is read from AWS_LAMBDA_FUNCTION_MEMORY_SIZE (default 1024 if unset).
+    // The MAX_CONCURRENCY env var overrides this default when provided.
+    unsigned int memory_mb = 1024;
+    {
+        auto mem_env = Aws::Environment::GetEnv("AWS_LAMBDA_FUNCTION_MEMORY_SIZE");
+        if (!mem_env.empty()) {
+            try {
+                unsigned long parsed_mem = std::stoul(mem_env.c_str());
+                if (parsed_mem >= 1) {
+                    memory_mb = static_cast<unsigned int>(parsed_mem);
+                }
+            }
+            catch (...) {
+                // ignore parse errors, keep default
+            }
+        }
+    }
+    unsigned int default_limit = std::max(8u, std::min(64u, memory_mb / 32u));
     unsigned int concurrency_limit = default_limit;
     {
         auto env_val = Aws::Environment::GetEnv("MAX_CONCURRENCY");
